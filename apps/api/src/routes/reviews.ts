@@ -109,7 +109,12 @@ export const reviewRoutes = new Elysia()
       })),
     }
   })
-  .get('/api/albums/:albumId/reviews', async ({ params, query, set }) => {
+  .get('/api/albums/:albumId/reviews', async ({ request, params, query, set }) => {
+    set.headers ??= {}
+    set.headers['Cache-Control'] = 'private, no-store'
+    const authUser = await ensureAuthenticated(request, set)
+    if (!authUser) return { error: 'Unauthorized.' }
+
     const albumId = readIdentifier(params?.albumId)
     if (!albumId) {
       set.status = 400
@@ -122,7 +127,6 @@ export const reviewRoutes = new Elysia()
     const reviews = await db
       .select({
         id: userReview.id,
-        userId: userReview.userId,
         content: userReview.content,
         updatedAt: userReview.updatedAt,
         userName: user.name,
@@ -136,8 +140,10 @@ export const reviewRoutes = new Elysia()
 
     return {
       data: reviews.map((r) => ({
-        ...r,
-        updatedAt: r.updatedAt.getTime(),
+        id: r.id,
+        content: r.content,
+        createdAt: r.updatedAt.getTime(),
+        user: { name: r.userName, image: r.userImage },
       })),
     }
   })

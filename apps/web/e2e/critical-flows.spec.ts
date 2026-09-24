@@ -119,6 +119,136 @@ test.describe('Critical user flows', () => {
     expect(offsets.at(-1)).toBe('12')
   })
 
+  test('search follows browser history and keeps earlier results visible while loading more', async ({ page }) => {
+    await page.goto('/search?q=pagination')
+    await expect(page.getByText('Pagination Album 12')).toBeVisible()
+
+    let releaseNextPage: (() => void) | undefined
+    await page.route('**/api/search?*', async (route) => {
+      const url = new URL(route.request().url())
+      if (url.searchParams.get('q') === 'pagination' && url.searchParams.get('offset') === '12') {
+        await new Promise<void>((resolve) => { releaseNextPage = resolve })
+      }
+      await route.fallback()
+    })
+
+    const nextPageRequest = page.waitForRequest((request) => {
+      const url = new URL(request.url())
+      return url.pathname === '/api/search' && url.searchParams.get('q') === 'pagination' && url.searchParams.get('offset') === '12'
+    })
+    await page.getByRole('button', { name: /load more/i }).click()
+    await nextPageRequest
+    await expect(page.getByRole('heading', { name: 'Pagination Album 1', exact: true })).toBeVisible()
+    releaseNextPage?.()
+    await expect(page.getByText('Pagination Album 13')).toBeVisible()
+
+    await page.getByPlaceholder(/search music/i).fill('U2')
+    await page.getByPlaceholder(/search music/i).press('Enter')
+    await expect(page).toHaveURL('/search?q=U2')
+    await expect(page.getByRole('heading', { name: 'U2', exact: true })).toBeVisible()
+    await expect(page.locator('article').filter({ hasText: 'U2' })).toHaveCount(1)
+
+    await page.goBack()
+    await expect(page).toHaveURL('/search?q=pagination')
+    await expect(page.getByRole('heading', { name: '“pagination”' })).toBeVisible()
+    await expect(page.getByText('Pagination Album 13')).toBeVisible()
+  })
+
+  test('a failed next search page keeps results and can be retried', async ({ page }) => {
+    let nextPageAttempts = 0
+    await page.route('**/api/search?*', async (route) => {
+      const url = new URL(route.request().url())
+      if (url.searchParams.get('q') === 'pagination' && url.searchParams.get('offset') === '12') {
+        nextPageAttempts += 1
+        if (nextPageAttempts <= 2) {
+          await route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"Catalog temporarily unavailable"}' })
+          return
+        }
+      }
+      await route.fallback()
+    })
+
+    await page.goto('/search?q=pagination')
+    await expect(page.getByRole('heading', { name: 'Pagination Album 1', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Load More' }).click()
+    await expect(page.getByRole('alert')).toContainText('Catalog temporarily unavailable')
+    await expect(page.getByRole('heading', { name: 'Pagination Album 1', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Retry Load More' }).click()
+    await expect(page.getByText('Pagination Album 13')).toBeVisible()
+  })
+
+  test('album cards can be opened with the keyboard without speculative detail requests', async ({ page }) => {
+    const detailRequests: string[] = []
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname.startsWith('/api/releases/')) detailRequests.push(request.url())
+    })
+
+    await page.goto('/')
+    const card = page.locator('article').filter({ hasText: 'Discovery' }).first()
+    await card.hover()
+    await page.waitForTimeout(700)
+    expect(detailRequests).toHaveLength(0)
+
+    await card.focus()
+    await page.keyboard.press('Enter')
+    await expect(page).toHaveURL(/\/album\/m:1001$/)
+  })
+
+  test('home and discover controls render while album sections load', async ({ page }) => {
+    let releaseHome: (() => void) | undefined
+    let releaseFeatured: (() => void) | undefined
+    await page.route('**/api/home*', async (route) => {
+      await new Promise<void>((resolve) => { releaseHome = resolve })
+      await route.fallback()
+    })
+    await page.route('**/api/featured*', async (route) => {
+      await new Promise<void>((resolve) => { releaseFeatured = resolve })
+      await route.fallback()
+    })
+
+    const homeRequest = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/home')
+    await page.goto('/')
+    await homeRequest
+    await expect(page.getByText('Listening Room')).toBeVisible()
+    await expect(page.getByRole('heading', { name: /most happening right now/i })).toBeVisible()
+    releaseHome?.()
+
+    const featuredRequest = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/featured')
+    await page.goto('/discover')
+    await featuredRequest
+    await expect(page.getByRole('heading', { name: /dig through the vault/i })).toBeVisible()
+    await expect(page.getByPlaceholder(/search artists or albums/i)).toBeVisible()
+    releaseFeatured?.()
+    await expect(page.locator('article').filter({ hasText: 'Discovery' }).first()).toBeVisible()
+  })
+
+  test('predictive search does not offer results from a previous term', async ({ page }) => {
+    await page.goto('/discover')
+    const search = page.getByPlaceholder(/search artists or albums/i)
+    await search.fill('daft punk')
+    await expect(page.getByRole('button', { name: /Discovery.*Daft Punk/i })).toBeVisible()
+
+    await search.fill('beatles')
+    expect(await page.getByRole('button', { name: /Discovery.*Daft Punk/i }).count()).toBe(0)
+  })
+
+  test('recent searches can be reopened with the keyboard', async ({ page }) => {
+    await page.goto('/search?q=pagination')
+    const search = page.getByPlaceholder(/search music/i)
+    await search.fill('U2')
+    await search.press('Enter')
+    await expect(page).toHaveURL('/search?q=U2')
+    await search.fill('daft punk')
+    await search.press('Enter')
+    await expect(page).toHaveURL('/search?q=daft+punk')
+
+    await search.fill('')
+    const recentSearch = page.getByRole('button', { name: 'Search U2' })
+    await recentSearch.focus()
+    await page.keyboard.press('Enter')
+    await expect(page).toHaveURL('/search?q=U2')
+  })
+
   test('short full-page searches request and render results', async ({ page }) => {
     const requests: string[] = []
     page.on('request', (request) => {
@@ -171,5 +301,70 @@ test.describe('Critical user flows', () => {
 
     await expect(page.getByText(/review posted\./i)).toBeVisible()
     await expect(page.locator('p', { hasText: /incredible production and timeless grooves\./i }).first()).toBeVisible()
+  })
+
+  test('guests cannot fetch or see album reviews', async ({ page }) => {
+    let reviewRequests = 0
+    await page.route('**/api/albums/*/reviews*', async (route) => {
+      reviewRequests += 1
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: [{ id: 'private-review', content: 'Private review text', user: { name: 'Someone' }, createdAt: Date.now() }] }),
+      })
+    })
+
+    await page.goto('/album/m:1001')
+    await expect(page.getByRole('heading', { name: 'Discovery' })).toBeVisible()
+    await expect(page.getByText('Sign in to read and write reviews.')).toBeVisible()
+    expect(reviewRequests).toBe(0)
+    await expect(page.getByText('Private review text')).toHaveCount(0)
+  })
+
+  test('album track durations line up in a fixed column', async ({ page }) => {
+    await page.goto('/album/m:1001')
+    await expect(page.getByRole('heading', { name: 'Discovery' })).toBeVisible()
+    const durations = page.getByTestId('track-duration')
+    await expect(durations).toHaveCount(3)
+    const positions = await durations.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().left))
+    expect(Math.max(...positions) - Math.min(...positions)).toBeLessThan(2)
+  })
+
+  test('lists show their loading state until the account lists arrive', async ({ page }) => {
+    let releaseLists: (() => void) | undefined
+    await page.route('**/api/me/lists', async (route) => {
+      if (route.request().method() === 'GET') {
+        await new Promise<void>((resolve) => { releaseLists = resolve })
+      }
+      await route.fallback()
+    })
+    await signIn(page)
+    await page.goto('/album/m:1001')
+    await expect(page.getByRole('heading', { name: 'Discovery' })).toBeVisible()
+    await expect(page.getByText('Loading your lists')).toBeVisible()
+    releaseLists?.()
+    await expect(page.getByRole('button', { name: /favorites/i })).toBeVisible()
+  })
+
+  test('a failed list load offers a retry instead of showing an empty account', async ({ page }) => {
+    await signIn(page)
+    let attempts = 0
+    await page.route('**/api/me/lists', async (route) => {
+      if (route.request().method() === 'GET') {
+        attempts += 1
+        if (attempts === 1) {
+          await route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"Lists unavailable"}' })
+          return
+        }
+      }
+      await route.fallback()
+    })
+
+    await page.goto('/album/m:1001')
+    await expect(page.getByRole('heading', { name: 'Discovery' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Retry loading lists' })).toBeVisible()
+    await page.getByRole('button', { name: 'Retry loading lists' }).click()
+    await expect(page.getByRole('button', { name: /favorites/i })).toBeVisible()
+    expect(attempts).toBe(2)
   })
 })

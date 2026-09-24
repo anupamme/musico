@@ -9,6 +9,7 @@ import ReviewInput from '../components/review/ReviewInput.jsx'
 import ReviewsList from '../components/review/ReviewsList.jsx'
 import StreamingLinks from '../components/album/StreamingLinks.jsx'
 import CoverImage from '../components/ui/CoverImage.jsx'
+import { AlbumDetailsPageSkeleton } from '../components/ui/PageLoadingState.jsx'
 import { useAuth } from '../hooks/useAuth.js'
 import { useLists } from '../hooks/useLists.js'
 import { useRatings } from '../hooks/useRatings.js'
@@ -30,6 +31,9 @@ const AlbumDetails = () => {
   const { user } = useAuth()
   const {
     lists,
+    loadingLists,
+    listLoadError,
+    refreshLists,
     listenLaterList,
     createList,
     toggleAlbumInList,
@@ -216,19 +220,7 @@ const AlbumDetails = () => {
   if (loading) {
     return (
       <PageTransition>
-        <div className="grid gap-8 tablet:grid-cols-[360px,1fr]">
-          <div className="h-[420px] rounded-2xl border border-outline bg-panel/60" />
-          <div className="space-y-4">
-            <div className="h-3 w-24 rounded-full bg-white/10" />
-            <div className="h-12 w-2/3 rounded-xl bg-white/10" />
-            <div className="h-6 w-1/2 rounded-full bg-white/10" />
-            <div className="space-y-2">
-              <div className="h-4 rounded-full bg-white/5" />
-              <div className="h-4 rounded-full bg-white/5" />
-            </div>
-            <div className="h-48 rounded-2xl border border-outline bg-panel/60" />
-          </div>
-        </div>
+        <AlbumDetailsPageSkeleton />
       </PageTransition>
     )
   }
@@ -323,16 +315,16 @@ const AlbumDetails = () => {
               <div className="relative z-10 flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[0.62rem] uppercase tracking-[0.35em] text-white/65">Lists</p>
-                  <p className="text-sm text-white/85">{listsContainingAlbum.size} selected</p>
+                  <p className="text-sm text-white/85">{loadingLists && isSignedIn ? 'Loading your lists' : listLoadError && isSignedIn ? 'Lists unavailable' : `${listsContainingAlbum.size} selected`}</p>
                 </div>
-                <p className="text-xs uppercase tracking-[0.2em] text-white/60">{lists.length} total</p>
+                <p className="text-xs uppercase tracking-[0.2em] text-white/60">{loadingLists && isSignedIn ? 'Loading' : listLoadError && isSignedIn ? 'Try again' : `${lists.length} total`}</p>
               </div>
 
               <div className="relative z-10 mt-3">
                 <button
                   type="button"
                   onClick={handleToggleListenLater}
-                  disabled={!isSignedIn || listenLaterPending}
+                  disabled={!isSignedIn || loadingLists || listLoadError || listenLaterPending}
                   aria-label="Toggle Listen Later"
                   className={`inline-flex touch-manipulation items-center gap-2 rounded-full border px-4 py-2 text-xs uppercase tracking-[0.2em] transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:opacity-55 ${
                     inListenLater
@@ -359,13 +351,13 @@ const AlbumDetails = () => {
                   onChange={(event) => setNewListName(event.target.value)}
                   placeholder="New list"
                   autoComplete="off"
-                  disabled={!isSignedIn}
+                  disabled={!isSignedIn || loadingLists || listLoadError}
                   className="min-w-0 flex-1 bg-transparent text-sm text-white placeholder:text-white/45 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 />
                 <button
                   type="button"
                   onClick={handleCreateList}
-                  disabled={!isSignedIn}
+                  disabled={!isSignedIn || loadingLists || listLoadError}
                   aria-label="Create list"
                   className="inline-flex h-9 w-9 touch-manipulation items-center justify-center rounded-full border border-white/35 bg-white/90 text-canvas transition-colors duration-200 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:opacity-45"
                 >
@@ -387,7 +379,16 @@ const AlbumDetails = () => {
               )}
 
               <div className="relative z-10 mt-5 flex flex-wrap gap-2.5">
-                {lists.length ? (
+                {loadingLists && isSignedIn ? (
+                  <div aria-hidden="true" className="flex gap-2.5">
+                    <span className="h-9 w-28 rounded-full bg-gradient-to-r from-white/10 via-white/5 to-white/10 bg-[length:220px_100%] motion-safe:animate-shimmer" />
+                    <span className="h-9 w-24 rounded-full bg-gradient-to-r from-white/10 via-white/5 to-white/10 bg-[length:220px_100%] motion-safe:animate-shimmer" />
+                  </div>
+                ) : listLoadError && isSignedIn ? (
+                  <button type="button" onClick={() => void refreshLists().catch(() => {})} className="rounded-full border border-white/35 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/85 transition-colors hover:border-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70">
+                    Retry loading lists
+                  </button>
+                ) : lists.length ? (
                   lists.map((list, index) => {
                     const isActive = listsContainingAlbum.has(list.id)
                     const isBusy = busyListIds.has(list.id)
@@ -437,15 +438,15 @@ const AlbumDetails = () => {
                 album.tracks.map((track, index) => (
                   <div
                     key={track.id ?? track.track_number}
-                    className="flex items-center justify-between border-b border-outline/80 px-2 py-3 text-sm last:border-b-0"
+                    className="grid grid-cols-[minmax(0,1fr)_4.5rem] items-center gap-3 border-b border-outline/80 px-2 py-3 text-sm last:border-b-0"
                   >
                     <div className="flex min-w-0 items-center gap-4">
                       <span className="w-4 text-xs tabular-nums text-muted">{track.track_number ?? index + 1}</span>
                       <span className="truncate text-white">{track.name}</span>
                     </div>
-                    <span className="ml-3 flex shrink-0 items-center gap-2 text-xs uppercase tracking-[0.18em] text-muted">
-                      <FiClock aria-hidden="true" />
-                      {formatDuration(track.duration_ms)}
+                    <span data-testid="track-duration" className="grid grid-cols-[1rem_1fr] items-center gap-2 text-xs tabular-nums text-muted">
+                      <FiClock aria-hidden="true" className="h-3.5 w-3.5" />
+                      <span className="text-right">{formatDuration(track.duration_ms)}</span>
                     </span>
                   </div>
                 ))
@@ -481,11 +482,11 @@ const AlbumDetails = () => {
                 >
                   Sign in
                 </button>{' '}
-                to write a review.
+                to read and write reviews.
               </div>
             )}
 
-            <ReviewsList key={reviewKey} albumId={album.id} />
+            {isSignedIn && <ReviewsList key={reviewKey} albumId={album.id} />}
           </section>
         </section>
       </div>

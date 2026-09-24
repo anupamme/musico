@@ -61,13 +61,24 @@ const applyAlbumToggleToList = (list, albumSummary, added, timestamp) => {
 export const ListsProvider = ({ children }) => {
   const { user, isPending } = useAuth()
   const [lists, setLists] = useState([])
+  const [loadingLists, setLoadingLists] = useState(isPending || Boolean(user?.id))
+  const [listLoadError, setListLoadError] = useState(false)
 
   const loadRemoteLists = useCallback(async () => {
-    const remote = await fetchMyLists()
-    const normalized = remote.map(normalizeRemoteList).filter(Boolean)
-    const sorted = sortListsByUpdatedAt(normalized)
-    setLists(sorted)
-    return sorted
+    setLoadingLists(true)
+    setListLoadError(false)
+    try {
+      const remote = await fetchMyLists()
+      const normalized = remote.map(normalizeRemoteList).filter(Boolean)
+      const sorted = sortListsByUpdatedAt(normalized)
+      setLists(sorted)
+      return sorted
+    } catch (error) {
+      setListLoadError(true)
+      throw error
+    } finally {
+      setLoadingLists(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -75,12 +86,18 @@ export const ListsProvider = ({ children }) => {
 
     const loadLists = async () => {
       setLists([])
-      if (isPending) return
+      setListLoadError(false)
+      if (isPending) {
+        setLoadingLists(true)
+        return
+      }
       if (!user?.id) {
         setLists([])
+        setLoadingLists(false)
         return
       }
 
+      setLoadingLists(true)
       try {
         const remote = await fetchMyLists()
         if (isCancelled) return
@@ -89,7 +106,10 @@ export const ListsProvider = ({ children }) => {
       } catch {
         if (!isCancelled) {
           setLists([])
+          setListLoadError(true)
         }
+      } finally {
+        if (!isCancelled) setLoadingLists(false)
       }
     }
 
@@ -299,6 +319,9 @@ export const ListsProvider = ({ children }) => {
   const value = useMemo(
     () => ({
       lists,
+      loadingLists,
+      listLoadError,
+      refreshLists: loadRemoteLists,
       listenLaterList,
       createList,
       toggleAlbumInList,
@@ -308,6 +331,9 @@ export const ListsProvider = ({ children }) => {
     }),
     [
       lists,
+      loadingLists,
+      listLoadError,
+      loadRemoteLists,
       listenLaterList,
       createList,
       toggleAlbumInList,

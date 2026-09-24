@@ -1,5 +1,5 @@
 import { Elysia } from 'elysia'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { db } from '../core/db'
 import {
   user,
@@ -22,24 +22,29 @@ export const listRoutes = new Elysia({ prefix: '/api' })
     const authUser = await ensureAuthenticated(request, set)
     if (!authUser) return { error: 'Unauthorized.' }
 
-    const lists = await db.select().from(userList).where(eq(userList.userId, authUser.id))
-    if (!lists.length) {
+    const rows = await db
+      .select({ list: userList, album: userListAlbum })
+      .from(userList)
+      .leftJoin(userListAlbum, eq(userListAlbum.listId, userList.id))
+      .where(eq(userList.userId, authUser.id))
+
+    if (!rows.length) {
       set.headers ??= {}
       set.headers['Cache-Control'] = 'no-store'
       return { data: [] }
     }
 
-    const listIds = lists.map((entry) => entry.id)
-    const albums = await db.select().from(userListAlbum).where(inArray(userListAlbum.listId, listIds))
-    const albumsByList = new Map<string, typeof albums>()
-
-    albums.forEach((entry) => {
-      const group = albumsByList.get(entry.listId) ?? []
-      group.push(entry)
-      albumsByList.set(entry.listId, group)
+    const listsById = new Map<string, typeof userList.$inferSelect>()
+    const albumsByList = new Map<string, (typeof userListAlbum.$inferSelect)[]>()
+    rows.forEach(({ list, album }) => {
+      listsById.set(list.id, list)
+      if (!album) return
+      const group = albumsByList.get(list.id) ?? []
+      group.push(album)
+      albumsByList.set(list.id, group)
     })
 
-    const data = [...lists]
+    const data = [...listsById.values()]
       .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
       .map((list) => {
         const listAlbums = (albumsByList.get(list.id) ?? [])
