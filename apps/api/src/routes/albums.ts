@@ -41,12 +41,12 @@ export const albumRoutes = new Elysia({ prefix: '/api' })
         loadStoredFeaturedSection('recent-popular', recentLimit),
       ])
 
-      const mostHappeningData = mostHappening.status === 'fulfilled'
-        ? await attachMusicoCommunityStats(mostHappening.value)
-        : []
-      const recentReleasesData = recentReleases.status === 'fulfilled'
-        ? await attachMusicoCommunityStats(recentReleases.value)
-        : []
+      const happeningAlbums = mostHappening.status === 'fulfilled' ? mostHappening.value : []
+      const recentAlbums = recentReleases.status === 'fulfilled' ? recentReleases.value : []
+      // Hydrate both sections together so overlapping albums share one stats lookup.
+      const hydratedAlbums = await attachMusicoCommunityStats([...happeningAlbums, ...recentAlbums])
+      const mostHappeningData = hydratedAlbums.slice(0, happeningAlbums.length)
+      const recentReleasesData = hydratedAlbums.slice(happeningAlbums.length)
 
       const allFailed = mostHappening.status === 'rejected' && recentReleases.status === 'rejected'
       if (allFailed) {

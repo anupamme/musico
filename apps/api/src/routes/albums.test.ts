@@ -34,3 +34,50 @@ test('serves home from stored snapshots without synchronously refreshing provide
     recentReleases: { data: [] },
   })
 })
+
+for (const failedMode of [null, 'featured', 'recent-popular']) {
+  test(`hydrates home sections in one batch with ${failedMode ?? 'no'} section failure`, async () => {
+    const script = `
+      import { mock } from 'bun:test'
+      import { Elysia } from 'elysia'
+      const failedMode = ${JSON.stringify(failedMode)}
+      const batches = []
+      mock.module('./src/services/trending.ts', () => ({
+        loadStoredFeaturedSection: async (mode) => {
+          if (mode === failedMode) throw new Error('snapshot unavailable')
+          return mode === 'featured' ? [{ id: 'shared' }, { id: 'featured' }] : [{ id: 'recent' }, { id: 'shared' }]
+        },
+      }))
+      mock.module('./src/services/discogs.ts', () => ({ getReleaseDetails: async () => ({}) }))
+      mock.module('./src/core/utils.ts', () => ({
+        attachMusicoCommunityStats: async (albums) => {
+          batches.push(albums.map(album => album.id))
+          return albums.map(album => ({ ...album, communityRating: 4, reviewCount: 2 }))
+        },
+      }))
+      const { albumRoutes } = await import('./src/routes/albums.ts')
+      const response = await new Elysia().use(albumRoutes).handle(new Request('http://localhost/api/home'))
+      console.log(JSON.stringify({ body: await response.json(), batches, cache: response.headers.get('cache-control'), status: response.status }))
+    `
+    const child = Bun.spawn([process.execPath, '--eval', script], {
+      cwd: new URL('../..', import.meta.url).pathname,
+      stdout: 'pipe', stderr: 'pipe',
+    })
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+    ])
+    expect(stderr).toBe('')
+    expect(exitCode).toBe(0)
+    const result = JSON.parse(stdout)
+    const happening = failedMode === 'featured' ? [] : ['shared', 'featured']
+    const recent = failedMode === 'recent-popular' ? [] : ['recent', 'shared']
+    expect(result.status).toBe(200)
+    expect(result.batches).toEqual([[...happening, ...recent]])
+    const hydrate = (ids: string[]) => ids.map(id => ({ id, communityRating: 4, reviewCount: 2 }))
+    expect(result.body).toEqual({
+      mostHappening: { data: hydrate(happening), ...(failedMode === 'featured' ? { error: 'Unable to load most happening albums.' } : {}) },
+      recentReleases: { data: hydrate(recent), ...(failedMode === 'recent-popular' ? { error: 'Unable to load recent releases.' } : {}) },
+    })
+    expect(result.cache).toBe(failedMode ? 'no-store' : 'public, max-age=60, s-maxage=300, stale-while-revalidate=21000')
+  })
+}

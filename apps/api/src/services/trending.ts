@@ -331,20 +331,17 @@ const mergeStoredSnapshot = async (mode: StoredMode, incoming: ReleaseSummary[],
 export const getStoredTrendingAlbums = async (limit = 24, mode: StoredMode = DEFAULT_MODE) => {
   try {
     const safeLimit = clampLimit(limit)
-    const latestSnapshot = await db
+    const latestSnapshot = db
       .select({
         lastSeenAt: sql<Date | null>`max(${storedTrendingAlbum.lastSeenAt})`,
       })
       .from(storedTrendingAlbum)
       .where(eq(storedTrendingAlbum.mode, mode))
 
-    const snapshotAt = toDateOrNull(latestSnapshot[0]?.lastSeenAt)
-    if (!snapshotAt) return []
-
     const rows = await db
       .select()
       .from(storedTrendingAlbum)
-      .where(and(eq(storedTrendingAlbum.mode, mode), eq(storedTrendingAlbum.lastSeenAt, snapshotAt)))
+      .where(and(eq(storedTrendingAlbum.mode, mode), eq(storedTrendingAlbum.lastSeenAt, latestSnapshot)))
       .orderBy(asc(storedTrendingAlbum.rank))
       .limit(safeLimit)
 
