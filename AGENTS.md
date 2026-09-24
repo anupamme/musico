@@ -47,6 +47,12 @@ The workspace is defined for `apps/*` and `packages/*`. The primary code resides
 - Environment variables are managed via `.env` (derived from `.env.example`).
   - Important variables: `DATABASE_URL`, `DISCOGS_TOKEN`, `BETTER_AUTH_SECRET`.
 
+### Landing Changes and Releasing
+
+- A user request to land changes on `main` authorizes the normal protected-branch workflow: push a branch, open or update a pull request, wait for required checks, fix failures, and merge when GitHub permits it. Do not ask for separate permission for each step. Never bypass branch protection, required reviews, or failing checks.
+- A user request to release a new version authorizes tagging the verified commit on `main`, pushing the tag, running the existing release workflow, and checking the deployment and GitHub Release results. If the user does not specify a version, use the next unused patch version. Do not reuse an existing tag or release unmerged changes.
+- Ordinary code changes do not authorize a release. Ask only when a material version or deployment choice is unresolved, or when GitHub requires a human production approval. Report a failed check or deployment instead of claiming the release succeeded.
+
 ## Architectural Rules & Guidelines for LLMs
 
 ### Frontend Conventions (`apps/web`)
