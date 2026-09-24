@@ -40,6 +40,8 @@ const SearchBar = ({
   const navigate = useNavigate()
   const MotionDiv = motion.div
   const [value, setValue] = useState(query)
+  const [syncedQuery, setSyncedQuery] = useState(query)
+  const [pendingSubmittedQuery, setPendingSubmittedQuery] = useState(null)
   const [isFocused, setIsFocused] = useState(false)
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
   const inputRef = useRef(null)
@@ -63,18 +65,11 @@ const SearchBar = ({
     return () => window.removeEventListener('keydown', handleGlobalKeyDown)
   }, [])
 
-  useEffect(() => {
-    setValue(query)
-  }, [query])
-
-  useEffect(() => {
-    if (!enableHistory) {
-      setRecentSearches([])
-      return
-    }
-
-    setRecentSearches(getSearchHistory(historyScope))
-  }, [enableHistory, historyScope, isFocused])
+  if (syncedQuery !== query) {
+    setSyncedQuery(query)
+    if (pendingSubmittedQuery !== query) setValue(query)
+    if (pendingSubmittedQuery !== null) setPendingSubmittedQuery(null)
+  }
 
   const submitSearch = (term) => {
     const trimmed = term?.trim() ?? ''
@@ -83,6 +78,7 @@ const SearchBar = ({
     if (enableHistory) {
       addToSearchHistory(trimmed, historyScope)
     }
+    if (trimmed !== query) setPendingSubmittedQuery(trimmed)
     onSearch?.(trimmed)
     setIsFocused(false)
     inputRef.current?.blur()
@@ -140,17 +136,23 @@ const SearchBar = ({
             applyValue(nextValue)
             setActiveSuggestionIndex(-1)
           }}
-          onFocus={() => setIsFocused(true)}
+          onFocus={() => {
+            setIsFocused(true)
+            setRecentSearches(enableHistory ? getSearchHistory(historyScope) : [])
+          }}
           onBlur={() => setTimeout(() => setIsFocused(false), 200)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder ?? 'Search music, artists, vibes...'}
+          aria-label="Search music"
           autoFocus={autoFocus}
           className="flex-1 bg-transparent text-base text-white placeholder:text-muted/60 focus:outline-none"
         />
 
         <div className="flex items-center gap-2">
           {value && (
-            <button 
+            <button
+              type="button"
+              aria-label="Clear search"
               onClick={() => applyValue('')}
               className="p-1 text-muted hover:text-white"
             >
@@ -222,7 +224,9 @@ const SearchBar = ({
               <div className="p-2">
                 <div className="flex items-center justify-between px-3 py-2">
                   <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted text-center">Recent Searches</p>
-                  <button 
+                  <button
+                    type="button"
+                    aria-label="Clear recent searches"
                     onClick={(e) => {
                       e.stopPropagation()
                       clearSearchHistory(historyScope)
@@ -235,18 +239,25 @@ const SearchBar = ({
                 </div>
                 <div className="mt-1 space-y-1">
                   {recentSearches.map((term) => (
-                    <div key={term} className="group flex items-center justify-between rounded-xl px-3 py-2 hover:bg-white/5 transition-colors cursor-pointer" onClick={() => applyValue(term)}>
-                      <div className="flex items-center gap-3 min-w-0">
+                    <div key={term} className="group flex items-center justify-between rounded-xl px-3 py-2 hover:bg-white/5 transition-colors">
+                      <button
+                        type="button"
+                        onClick={() => submitSearch(term)}
+                        className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+                        aria-label={`Search ${term}`}
+                      >
                         <FiClock className="shrink-0 text-muted" />
                         <span className="truncate text-sm text-white/80">{term}</span>
-                      </div>
-                      <button 
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${term} from recent searches`}
                         onClick={(e) => {
                           e.stopPropagation()
                           removeFromSearchHistory(term, historyScope)
                           setRecentSearches(getSearchHistory(historyScope))
                         }}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-muted hover:text-red-400 transition-all"
+                        className="p-1 text-muted opacity-0 transition-all hover:text-red-400 focus:opacity-100 group-hover:opacity-100"
                       >
                         <FiX />
                       </button>

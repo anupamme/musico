@@ -5,7 +5,6 @@ import { useNavigate } from 'react-router-dom'
 import AlbumGrid from '../components/album/AlbumGrid.jsx'
 import Hero from '../components/ui/Hero.jsx'
 import PageTransition from '../components/ui/PageTransition.jsx'
-import { HomePageSkeleton } from '../components/ui/PageLoadingState.jsx'
 import { homeSectionsQueryOptions } from '../queries/homeSections.js'
 import { useInfiniteScroll } from '../hooks/useInfiniteScroll.js'
 
@@ -45,14 +44,6 @@ const Home = () => {
     { enabled: hasMoreRecent, rootMargin: '200px' }
   )
 
-  if (homeSectionsQuery.isLoading && !homeSectionsQuery.data) {
-    return (
-      <PageTransition>
-        <HomePageSkeleton />
-      </PageTransition>
-    )
-  }
-
   const handleAlbumSelect = (id) => {
     navigate(`/album/${id}`, { state: { from: '/', query: '' } })
   }
@@ -78,7 +69,7 @@ const Home = () => {
           </div>
           <AlbumGrid
             albums={visibleMostHappeningAlbums}
-            loading={false}
+            loading={homeSectionsQuery.isLoading && !homeSectionsQuery.data}
             error={happeningError}
             onSelect={handleAlbumSelect}
           />
@@ -93,7 +84,7 @@ const Home = () => {
           </div>
           <AlbumGrid
             albums={visibleRecentAlbums}
-            loading={false}
+            loading={homeSectionsQuery.isLoading && !homeSectionsQuery.data}
             error={recentError}
             onSelect={handleAlbumSelect}
           />

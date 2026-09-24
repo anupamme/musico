@@ -1,12 +1,13 @@
-import { useRef, useState } from 'react'
+import { useRef } from 'react'
 import { FiArrowLeft } from 'react-icons/fi'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useInfiniteQuery } from '@tanstack/react-query'
 
 import AlbumGrid from '../components/album/AlbumGrid.jsx'
 import PageTransition from '../components/ui/PageTransition.jsx'
 import SearchBar from '../components/search/SearchBar.jsx'
-import { useSearch } from '../hooks/useSearch.js'
 import { useAuth } from '../hooks/useAuth.js'
+import { searchReleases } from '../services/discogsService.js'
 import { addToSearchHistory } from '../services/searchHistoryService.js'
 import { recordSearchSignal } from '../services/searchSignalService.js'
 
@@ -16,27 +17,29 @@ const SearchResults = () => {
   const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuth()
   
-  const initialQuery = searchParams.get('q') ?? ''
-  const [query, setQuery] = useState(initialQuery)
-  const [offset, setOffset] = useState(0)
-  const [previousPages, setPreviousPages] = useState([])
+  const query = searchParams.get('q')?.trim() ?? ''
   const lastLoggedQueryRef = useRef('')
 
-  // Professional Fetching with TanStack Query
-  const { 
-    suggestions: albums, 
-    isLoading: loading, 
-    isFetching,
-    error, 
-    correctedQuery,
-    hasMore,
-    nextOffset,
-  } = useSearch(query, { 
-    limit: pageSize,
-    offset,
-    minLength: 1,
-    enabled: !!query 
+  const {
+    data,
+    isPending,
+    isFetchingNextPage,
+    isFetchNextPageError,
+    error,
+    hasNextPage,
+    fetchNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['search-results', query, pageSize],
+    queryFn: ({ pageParam, signal }) => searchReleases(query, { limit: pageSize, offset: pageParam, signal }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => lastPage.hasMore && lastPage.nextOffset != null
+      ? lastPage.nextOffset
+      : undefined,
+    enabled: Boolean(query),
+    staleTime: 5 * 60 * 1000,
   })
+  const albums = data?.pages.flatMap((page) => page.data) ?? []
+  const correctedQuery = data?.pages[0]?.correctedQuery ?? null
 
   const logSearch = (value) => {
     const trimmed = value?.trim() ?? ''
@@ -50,25 +53,17 @@ const SearchResults = () => {
 
   // Handle Search Submission
   const handleSearch = (newQuery) => {
-    setQuery(newQuery)
-    setOffset(0)
-    setPreviousPages([])
-    if (newQuery?.trim()) {
-      addToSearchHistory(newQuery, user?.id ?? 'guest')
-      logSearch(newQuery)
+    const trimmed = newQuery?.trim() ?? ''
+    if (trimmed) {
+      addToSearchHistory(trimmed, user?.id ?? 'guest')
+      logSearch(trimmed)
       
       const params = new URLSearchParams()
-      params.set('q', newQuery)
-      setSearchParams(params, { replace: true })
+      params.set('q', trimmed)
+      if (trimmed !== query) setSearchParams(params)
     } else {
       navigate('/discover')
     }
-  }
-
-  const loadMore = () => {
-    if (nextOffset === null) return
-    setPreviousPages((pages) => [...pages, ...albums])
-    setOffset(nextOffset)
   }
 
   return (
@@ -92,7 +87,7 @@ const SearchResults = () => {
         <SearchBar
           query={query}
           onSearch={handleSearch}
-          autoFocus={!initialQuery}
+          autoFocus={!query}
           historyScope={user?.id ?? 'guest'}
           enablePredictive={false}
         />
@@ -100,21 +95,26 @@ const SearchResults = () => {
         {query && (
           <div className="mt-12">
             <AlbumGrid
-              albums={[...previousPages, ...albums]}
-              loading={loading}
-              error={error?.message}
+              albums={albums}
+              loading={isPending}
+              error={data ? null : error?.message}
               correctedQuery={correctedQuery}
               onSelect={(id) => navigate(`/album/${id}`, { state: { from: '/search', query } })}
             />
-            {!loading && !error && hasMore && (
+            {isFetchNextPageError && (
+              <p role="alert" className="mt-4 text-center text-sm text-red-300">
+                {error?.message ?? 'Could not load more results.'} Please try again.
+              </p>
+            )}
+            {hasNextPage && (
               <div className="mt-8 flex justify-center">
                 <button
                   type="button"
-                  onClick={loadMore}
-                  disabled={isFetching}
+                  onClick={() => fetchNextPage()}
+                  disabled={isFetchingNextPage}
                   className="rounded-full border border-outline px-6 py-3 text-xs font-bold uppercase tracking-[0.24em] text-white transition hover:border-white/40 hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
                 >
-                  {isFetching ? 'Loading' : 'Load More'}
+                  {isFetchingNextPage ? 'Loading' : isFetchNextPageError ? 'Retry Load More' : 'Load More'}
                 </button>
               </div>
             )}

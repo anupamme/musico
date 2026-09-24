@@ -35,7 +35,8 @@ export const useSearch = (query, { enabled = true, limit = 5, offset = 0, minLen
 
   return {
     ...queryResult,
-    suggestions: queryResult.data?.data ?? [],
+    suggestions: debouncedQuery === query ? queryResult.data?.data ?? [] : [],
+    isLoading: queryResult.isLoading || debouncedQuery !== query,
     correctedQuery: queryResult.data?.correctedQuery ?? null,
     hasMore: Boolean(queryResult.data?.hasMore),
     nextOffset: queryResult.data?.nextOffset ?? null,

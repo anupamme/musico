@@ -1,6 +1,5 @@
-import { memo, useRef } from 'react'
+import { memo } from 'react'
 import { motion } from 'framer-motion'
-import { prefetchReleaseDetails } from '../../services/discogsService.js'
 import { useRatings } from '../../hooks/useRatings.js'
 import { formatReleaseDate } from '../../utils/helpers.js'
 import RatingStars from '../ui/RatingStars.jsx'
@@ -9,26 +8,12 @@ import CoverImage from '../ui/CoverImage.jsx'
 const AlbumCard = ({ album, onSelect }) => {
   const MotionArticle = motion.article
   const { getCommunityStats } = useRatings()
-  const prefetchTimerRef = useRef(null)
   const community = getCommunityStats(album)
   const genres = Array.isArray(album.genres) ? album.genres.filter(Boolean) : []
   const genreLabel = genres.slice(0, 2).join(' • ')
 
   const handleNavigate = () => {
     onSelect?.(album.id)
-  }
-
-  const handleMouseEnter = () => {
-    prefetchTimerRef.current = setTimeout(() => {
-      prefetchReleaseDetails(album.id)
-    }, 100)
-  }
-
-  const handleMouseLeave = () => {
-    if (prefetchTimerRef.current) {
-      clearTimeout(prefetchTimerRef.current)
-      prefetchTimerRef.current = null
-    }
   }
 
   return (
@@ -38,9 +23,13 @@ const AlbumCard = ({ album, onSelect }) => {
       animate={{ opacity: 1, y: 0 }}
       whileHover={{ y: -6 }}
       onClick={handleNavigate}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-      className="group relative flex cursor-pointer flex-col gap-4 rounded-3xl border border-outline bg-panel p-4 text-white transition hover:border-white/40"
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') handleNavigate()
+      }}
+      role={onSelect ? 'link' : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      aria-label={onSelect ? `Open ${album.name}` : undefined}
+      className="group relative flex cursor-pointer flex-col gap-4 rounded-3xl border border-outline bg-panel p-4 text-white transition hover:border-white/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
     >
       <div className="relative aspect-square overflow-hidden rounded-2xl bg-black/40">
         <CoverImage
