@@ -119,14 +119,10 @@ export const fetchAlbumReviews = async (albumId, { cursor, limit = 10 } = {}) =>
   const params = { limit }
   if (cursor) params.cursor = cursor
 
-  try {
-    const response = await api.get(`/api/albums/${encodeURIComponent(albumId)}/reviews`, { params })
-    return {
-      reviews: Array.isArray(response.data) ? response.data : [],
-      nextCursor: response.nextCursor ?? null,
-    }
-  } catch {
-    return { reviews: [], nextCursor: null }
+  const response = await api.get(`/api/albums/${encodeURIComponent(albumId)}/reviews`, { params })
+  return {
+    reviews: Array.isArray(response.data) ? response.data : [],
+    nextCursor: response.nextCursor ?? null,
   }
 }
 

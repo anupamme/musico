@@ -9,12 +9,14 @@ const ReviewsList = ({ albumId }) => {
   const [nextCursor, setNextCursor] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
     let cancelled = false
 
     const load = async () => {
       setLoading(true)
+      setError(false)
       try {
         const result = await fetchAlbumReviews(albumId)
         if (!cancelled) {
@@ -22,7 +24,7 @@ const ReviewsList = ({ albumId }) => {
           setNextCursor(result.nextCursor)
         }
       } catch {
-        // ignore
+        if (!cancelled) setError(true)
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -42,7 +44,7 @@ const ReviewsList = ({ albumId }) => {
       setReviews((prev) => [...prev, ...result.reviews])
       setNextCursor(result.nextCursor)
     } catch {
-      // ignore
+      setError(true)
     } finally {
       setLoadingMore(false)
     }
@@ -52,10 +54,14 @@ const ReviewsList = ({ albumId }) => {
     return (
       <div className="space-y-3">
         {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="h-24 animate-pulse rounded-xl bg-white/5" />
+          <div key={i} className="h-24 rounded-xl bg-gradient-to-r from-white/10 via-white/5 to-white/10 bg-[length:240px_100%] motion-safe:animate-shimmer" />
         ))}
       </div>
     )
+  }
+
+  if (error && !reviews.length) {
+    return <p role="alert" className="py-6 text-center text-sm text-muted">Reviews could not be loaded right now.</p>
   }
 
   if (!reviews.length) {

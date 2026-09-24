@@ -2,7 +2,6 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 
 import AlbumGrid from '../components/album/AlbumGrid.jsx'
-import { DiscoverPageSkeleton } from '../components/ui/PageLoadingState.jsx'
 import PageTransition from '../components/ui/PageTransition.jsx'
 import SearchBar from '../components/search/SearchBar.jsx'
 import { useAuth } from '../hooks/useAuth.js'
@@ -22,14 +21,6 @@ const Discover = () => {
     queryFn: () => getRecentPopularReleases(RECENT_RELEASES_LIMIT),
     staleTime: 1000 * 60 * 5,
   })
-
-  if (recentReleasesQuery.isLoading && !recentReleasesQuery.data) {
-    return (
-      <PageTransition>
-        <DiscoverPageSkeleton />
-      </PageTransition>
-    )
-  }
 
   const albums = Array.isArray(recentReleasesQuery.data) ? recentReleasesQuery.data : []
   const error = recentReleasesQuery.error?.message ?? null
@@ -64,7 +55,7 @@ const Discover = () => {
 
         <div>
           <p className="mb-4 text-xs uppercase tracking-[0.4em] text-muted">Recent Releases</p>
-          <AlbumGrid albums={albums} loading={false} error={error} onSelect={handleAlbumSelect} />
+          <AlbumGrid albums={albums} loading={recentReleasesQuery.isLoading && !recentReleasesQuery.data} error={error} onSelect={handleAlbumSelect} />
         </div>
       </div>
     </PageTransition>
