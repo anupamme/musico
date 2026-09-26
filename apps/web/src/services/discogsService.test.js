@@ -74,24 +74,32 @@ test('updates both visible homepage query sections after community stats change'
   assert.equal(original.mostHappening.data[0].communityRating, undefined)
 })
 
-test('an in-flight Home fetch cannot overwrite saved community stats', async () => {
+test('an in-flight Home fetch restarts without overwriting saved community stats', async () => {
   const queryClient = new QueryClient()
   const original = {
     mostHappening: { data: [album], error: null },
     recentReleases: { data: [album], error: null },
   }
+  const refreshed = {
+    mostHappening: { data: [album], error: null },
+    recentReleases: { data: [album, { ...album, id: 'm:2' }], error: null },
+  }
   queryClient.setQueryData(homeSectionsQueryOptions.queryKey, original)
 
   let resolveFetch
   let fetchStarted
+  let fetches = 0
   const started = new Promise((resolve) => { fetchStarted = resolve })
   const fetch = queryClient.fetchQuery({
     queryKey: homeSectionsQueryOptions.queryKey,
     queryFn: ({ signal }) => {
-      // Consuming the signal lets TanStack Query cancel the pending request.
       void signal.aborted
-      fetchStarted()
-      return new Promise((resolve) => { resolveFetch = resolve })
+      fetches += 1
+      if (fetches === 1) {
+        fetchStarted()
+        return new Promise((resolve) => { resolveFetch = resolve })
+      }
+      return refreshed
     },
   })
 
@@ -105,8 +113,10 @@ test('an in-flight Home fetch cannot overwrite saved community stats', async () 
   await fetch.catch(() => {})
 
   const current = queryClient.getQueryData(homeSectionsQueryOptions.queryKey)
+  assert.equal(fetches, 2)
   assert.equal(current.mostHappening.data[0].communityRating, 4.5)
   assert.equal(current.recentReleases.data[0].reviewCount, 2)
+  assert.equal(current.recentReleases.data[1].id, 'm:2')
 })
 
 test('a cancelled Home request does not replace the patched service cache', async () => {

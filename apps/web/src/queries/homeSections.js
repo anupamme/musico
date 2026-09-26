@@ -20,15 +20,27 @@ export const homeSectionsQueryOptions = {
 }
 
 export const updateHomeSectionsCommunityStats = async (queryClient, stats) => {
-  await queryClient.cancelQueries({ queryKey: homeSectionsQueryOptions.queryKey, exact: true })
-  updateAlbumCommunityStatsInCache(stats)
+  const queryKey = homeSectionsQueryOptions.queryKey
+  const wasFetching = queryClient.getQueryState(queryKey)?.fetchStatus === 'fetching'
+  await queryClient.cancelQueries({ queryKey, exact: true })
 
-  if (!queryClient.getQueryData(homeSectionsQueryOptions.queryKey)) {
-    void queryClient.invalidateQueries({ queryKey: homeSectionsQueryOptions.queryKey, exact: true })
+  const patchCachedStats = () => {
+    updateAlbumCommunityStatsInCache(stats)
+    queryClient.setQueryData(queryKey, (current) => patchHomeSectionsCommunityStats(current, stats))
+  }
+
+  if (!queryClient.getQueryData(queryKey)) {
+    updateAlbumCommunityStatsInCache(stats)
+    void queryClient.invalidateQueries({ queryKey, exact: true })
     return
   }
 
-  queryClient.setQueryData(homeSectionsQueryOptions.queryKey, (current) =>
-    patchHomeSectionsCommunityStats(current, stats),
-  )
+  patchCachedStats()
+  if (wasFetching) {
+    try {
+      await queryClient.invalidateQueries({ queryKey, exact: true, refetchType: 'all' })
+    } finally {
+      patchCachedStats()
+    }
+  }
 }
