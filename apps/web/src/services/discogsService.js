@@ -6,7 +6,6 @@ const FEATURED_CACHE_WINDOW = 1000 * 60 * 5 // 5 minutes
 const DETAILS_CACHE_WINDOW = 1000 * 60 * 60 * 24 // 24 hours
 const SEARCH_CACHE_VERSION = 'v5'
 
-const featuredCache = { timestamp: 0, data: [] }
 const recentPopularCache = { timestamp: 0, data: [] }
 const homeSectionsCache = {
   timestamp: 0,
@@ -60,6 +59,22 @@ const patchAlbumStatsInCollection = (albums, albumId, communityRating, reviewCou
   return albums.map((album) => patchAlbumStats(album, albumId, communityRating, reviewCount))
 }
 
+export const patchHomeSectionsCommunityStats = (sections, { albumId, communityRating, reviewCount }) => {
+  if (!sections) return sections
+
+  return {
+    ...sections,
+    mostHappening: sections.mostHappening && {
+      ...sections.mostHappening,
+      data: patchAlbumStatsInCollection(sections.mostHappening.data, albumId, communityRating, reviewCount),
+    },
+    recentReleases: sections.recentReleases && {
+      ...sections.recentReleases,
+      data: patchAlbumStatsInCollection(sections.recentReleases.data, albumId, communityRating, reviewCount),
+    },
+  }
+}
+
 export const updateAlbumCommunityStatsInCache = ({ albumId, communityRating, reviewCount }) => {
   const normalizedAlbumId = String(albumId ?? '').trim()
   const normalizedRating = Number(communityRating)
@@ -68,12 +83,11 @@ export const updateAlbumCommunityStatsInCache = ({ albumId, communityRating, rev
   if (!normalizedAlbumId) return
   if (!Number.isFinite(normalizedRating) || !Number.isFinite(normalizedCount)) return
 
-  featuredCache.data = patchAlbumStatsInCollection(
-    featuredCache.data,
-    normalizedAlbumId,
-    normalizedRating,
-    normalizedCount,
-  )
+  homeSectionsCache.data = patchHomeSectionsCommunityStats(homeSectionsCache.data, {
+    albumId: normalizedAlbumId,
+    communityRating: normalizedRating,
+    reviewCount: normalizedCount,
+  })
   recentPopularCache.data = patchAlbumStatsInCollection(
     recentPopularCache.data,
     normalizedAlbumId,
@@ -127,28 +141,6 @@ export const updateAlbumCommunityStatsInCache = ({ albumId, communityRating, rev
   }
 }
 
-export const getFeaturedReleases = async (limit = 24) => {
-  if (featuredCache.data.length && isFresh(featuredCache.timestamp, FEATURED_CACHE_WINDOW)) {
-    return featuredCache.data.slice(0, limit)
-  }
-
-  const response = await validatedRequest({ url: '/api/featured', params: { limit } })
-  // Backend returns { data: [...] } which Axios interceptor resolves to response
-  // Wait, if it's already intercepted, response is the data payload! Wait, no, the backend returns { data: array }.
-  // So response is { data: array }.
-  const data = Array.isArray(response?.data) ? response.data : []
-  
-  // Validate silently
-  const result = AlbumArraySchema.safeParse(data)
-  if (!result.success) {
-    console.warn('[Validation Warning] Featured releases malformed:', result.error.format())
-  }
-
-  featuredCache.timestamp = Date.now()
-  featuredCache.data = data
-  return data.slice(0, limit)
-}
-
 export const getRecentPopularReleases = async (limit = 24) => {
   if (recentPopularCache.data.length && isFresh(recentPopularCache.timestamp, FEATURED_CACHE_WINDOW)) {
     return recentPopularCache.data.slice(0, limit)
@@ -156,14 +148,9 @@ export const getRecentPopularReleases = async (limit = 24) => {
 
   const response = await validatedRequest({
     url: '/api/featured',
-    params: {
-      limit,
-      mode: 'recent-popular',
-    },
+    params: { limit, mode: 'recent-popular' },
   })
-
   const data = Array.isArray(response?.data) ? response.data : []
-  
   const result = AlbumArraySchema.safeParse(data)
   if (!result.success) {
     console.warn('[Validation Warning] Recent popular releases malformed:', result.error.format())
@@ -197,7 +184,12 @@ export const getHomeSections = async (options = {}) => {
       happeningLimit,
       recentLimit,
     },
+    signal: options.signal,
   })
+
+  if (options.signal?.aborted) {
+    throw new DOMException('Home request cancelled', 'AbortError')
+  }
 
   const mostHappeningData = Array.isArray(response?.mostHappening?.data) ? response.mostHappening.data : []
   const recentReleasesData = Array.isArray(response?.recentReleases?.data) ? response.recentReleases.data : []
@@ -219,8 +211,6 @@ export const getHomeSections = async (options = {}) => {
     !response?.recentReleases?.error
 
   if (isHealthy) {
-    featuredCache.timestamp = Date.now()
-    featuredCache.data = mostHappeningData
     recentPopularCache.timestamp = Date.now()
     recentPopularCache.data = recentReleasesData
     homeSectionsCache.timestamp = Date.now()
@@ -292,12 +282,4 @@ export const getReleaseDetails = async (releaseId) => {
   const data = await validatedRequest({ url: `/api/releases/${releaseId}` }, AlbumSchema)
   storage.set(cacheKey, { data, timestamp: Date.now() })
   return data
-}
-
-export const prefetchReleaseDetails = async (releaseId) => {
-  try {
-    await getReleaseDetails(releaseId)
-  } catch {
-    // ignore prefetch errors
-  }
 }

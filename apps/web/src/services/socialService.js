@@ -1,16 +1,5 @@
 import api from './apiClient.js'
 
-// ── Profile ──
-
-export const fetchMyProfile = async () => {
-  try {
-    const response = await api.get('/api/me/profile')
-    return response.data ?? null
-  } catch {
-    return null
-  }
-}
-
 export const updateMyProfile = async ({ username, bio, image }) => {
   const payload = {}
   if (username !== undefined) payload.username = username
@@ -77,42 +66,11 @@ export const fetchMyFollowers = async () => {
   }
 }
 
-// ── Activity Feed ──
-
-export const fetchMyFeed = async ({ cursor, limit = 20 } = {}) => {
-  const params = { limit }
-  if (cursor) params.cursor = cursor
-
-  try {
-    const response = await api.get('/api/me/feed', { params })
-    return {
-      items: Array.isArray(response.data) ? response.data : [],
-      nextCursor: response.nextCursor ?? null,
-    }
-  } catch {
-    return { items: [], nextCursor: null }
-  }
-}
-
 // ── Reviews ──
 
 export const saveMyReview = async (albumId, { content, albumName, albumCover, albumArtists }) => {
   const response = await api.put(`/api/me/reviews/${encodeURIComponent(albumId)}`, { content, albumName, albumCover, albumArtists })
   return response.data ?? null
-}
-
-export const deleteMyReview = async (albumId) => {
-  const response = await api.delete(`/api/me/reviews/${encodeURIComponent(albumId)}`)
-  return response.data ?? { deleted: true }
-}
-
-export const fetchMyReviews = async () => {
-  try {
-    const response = await api.get('/api/me/reviews')
-    return Array.isArray(response.data) ? response.data : []
-  } catch {
-    return []
-  }
 }
 
 export const fetchAlbumReviews = async (albumId, { cursor, limit = 10 } = {}) => {
