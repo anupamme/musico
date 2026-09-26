@@ -184,7 +184,12 @@ export const getHomeSections = async (options = {}) => {
       happeningLimit,
       recentLimit,
     },
+    signal: options.signal,
   })
+
+  if (options.signal?.aborted) {
+    throw new DOMException('Home request cancelled', 'AbortError')
+  }
 
   const mostHappeningData = Array.isArray(response?.mostHappening?.data) ? response.mostHappening.data : []
   const recentReleasesData = Array.isArray(response?.recentReleases?.data) ? response.recentReleases.data : []

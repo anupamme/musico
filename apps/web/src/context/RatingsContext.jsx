@@ -4,8 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { useAuth } from '../hooks/useAuth.js'
 import { deleteMyRating, fetchMyRatings, saveMyRating } from '../services/profileDataService.js'
-import { updateAlbumCommunityStatsInCache } from '../services/discogsService.js'
-import { updateHomeSectionsCommunityStatsInQuery } from '../queries/homeSections.js'
+import { updateHomeSectionsCommunityStats } from '../queries/homeSections.js'
 
 export const RatingsContext = createContext(null)
 
@@ -104,16 +103,11 @@ export const RatingsProvider = ({ children }) => {
         const nextCommunityRating = Number(saved?.communityRating)
         const nextReviewCount = Number(saved?.reviewCount)
         if (Number.isFinite(nextCommunityRating) && Number.isFinite(nextReviewCount)) {
-          updateAlbumCommunityStatsInCache({
+          void updateHomeSectionsCommunityStats(queryClient, {
             albumId: normalizedAlbumId,
             communityRating: nextCommunityRating,
             reviewCount: nextReviewCount,
-          })
-          updateHomeSectionsCommunityStatsInQuery(queryClient, {
-            albumId: normalizedAlbumId,
-            communityRating: nextCommunityRating,
-            reviewCount: nextReviewCount,
-          })
+          }).catch((error) => console.error('Failed to update homepage ratings:', error))
 
           queryClient.setQueryData(['release', normalizedAlbumId], (current) =>
             current
