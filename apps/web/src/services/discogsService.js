@@ -59,6 +59,22 @@ const patchAlbumStatsInCollection = (albums, albumId, communityRating, reviewCou
   return albums.map((album) => patchAlbumStats(album, albumId, communityRating, reviewCount))
 }
 
+export const patchHomeSectionsCommunityStats = (sections, { albumId, communityRating, reviewCount }) => {
+  if (!sections) return sections
+
+  return {
+    ...sections,
+    mostHappening: sections.mostHappening && {
+      ...sections.mostHappening,
+      data: patchAlbumStatsInCollection(sections.mostHappening.data, albumId, communityRating, reviewCount),
+    },
+    recentReleases: sections.recentReleases && {
+      ...sections.recentReleases,
+      data: patchAlbumStatsInCollection(sections.recentReleases.data, albumId, communityRating, reviewCount),
+    },
+  }
+}
+
 export const updateAlbumCommunityStatsInCache = ({ albumId, communityRating, reviewCount }) => {
   const normalizedAlbumId = String(albumId ?? '').trim()
   const normalizedRating = Number(communityRating)
@@ -67,14 +83,11 @@ export const updateAlbumCommunityStatsInCache = ({ albumId, communityRating, rev
   if (!normalizedAlbumId) return
   if (!Number.isFinite(normalizedRating) || !Number.isFinite(normalizedCount)) return
 
-  for (const section of [homeSectionsCache.data.mostHappening, homeSectionsCache.data.recentReleases]) {
-    section.data = patchAlbumStatsInCollection(
-      section.data,
-      normalizedAlbumId,
-      normalizedRating,
-      normalizedCount,
-    )
-  }
+  homeSectionsCache.data = patchHomeSectionsCommunityStats(homeSectionsCache.data, {
+    albumId: normalizedAlbumId,
+    communityRating: normalizedRating,
+    reviewCount: normalizedCount,
+  })
   recentPopularCache.data = patchAlbumStatsInCollection(
     recentPopularCache.data,
     normalizedAlbumId,
