@@ -40,14 +40,6 @@ export const inferAlbumGenres = (album) => {
   return inferGenresFromSeed(album)
 }
 
-export const debounce = (fn, delay = 300) => {
-  let timer
-  return (...args) => {
-    clearTimeout(timer)
-    timer = setTimeout(() => fn(...args), delay)
-  }
-}
-
 export const createSkeletonArray = (count = 8) => Array.from({ length: count })
 
 export const formatLargeNumber = (value = 0) => {

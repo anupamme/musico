@@ -7,7 +7,7 @@ import type { ReleaseDetails, ReleaseSummary } from '../core/types'
 
 import { db } from '../core/db'
 import { env } from '../core/env'
-import { featuredCache as featuredCacheTable, releaseCache as releaseCacheTable, searchCache as searchCacheTable } from '../core/schema'
+import { releaseCache as releaseCacheTable, searchCache as searchCacheTable } from '../core/schema'
 
 const DISCOGS_BASE = 'https://api.discogs.com'
 const sanitizeDiscogsCredential = (value?: string) => {
@@ -24,9 +24,7 @@ const DISCOGS_USER_AGENT = env.DISCOGS_USER_AGENT
 
 const DISCOGS_CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 5 + 1000 * 60 * 55
 const RELEASE_CACHE_WINDOW = DISCOGS_CACHE_MAX_AGE_MS
-const FEATURED_DB_CACHE_WINDOW = env.FEATURED_CACHE_TTL_MS
 const SEARCH_DB_CACHE_WINDOW = env.SEARCH_CACHE_TTL_MS
-const FEATURED_RETRY_COOLDOWN_MS = env.FEATURED_RETRY_COOLDOWN_MS
 const FEATURED_REFRESH_SIZE = 50
 const FEATURED_DETAIL_HYDRATION_LIMIT = env.FEATURED_DETAIL_HYDRATION_LIMIT
 const SEARCH_CACHE_VERSION = 'v10'
@@ -44,7 +42,6 @@ const SMART_SEARCH_CORRECTION_TRIGGER_SCORE = 0.7
 const DISCOGS_MIN_REQUEST_INTERVAL_MS = env.DISCOGS_MIN_REQUEST_INTERVAL_MS
 const DISCOGS_MAX_RETRIES = env.DISCOGS_MAX_RETRIES
 const DISCOGS_REQUEST_TIMEOUT_MS = env.DISCOGS_REQUEST_TIMEOUT_MS
-const RELEASE_CACHE_MAX_ENTRIES = env.RELEASE_CACHE_MAX_ENTRIES
 
 // ── In-memory LRU cache to protect RAM and speed up repeat requests ──
 const releaseMemoryCache = new LRUCache<string, ReleaseDetails>({
@@ -61,23 +58,12 @@ type RankedSearchBatch = {
   total: number
 }
 
-const featuredRefreshInFlight = new Map<string, Promise<ReleaseSummary[]>>()
 const searchRefreshInFlight = new Map<string, Promise<RankedSearchBatch>>()
 let discogsNextRequestAt = 0
 
 const HEADERS: Record<string, string> = {
   'User-Agent': DISCOGS_USER_AGENT,
   Accept: 'application/json',
-}
-
-const setBoundedCacheEntry = <T>(cache: Map<string, T>, key: string, value: T, maxEntries: number) => {
-  if (cache.has(key)) cache.delete(key)
-  cache.set(key, value)
-  while (cache.size > maxEntries) {
-    const oldestKey = cache.keys().next().value
-    if (!oldestKey) break
-    cache.delete(oldestKey)
-  }
 }
 
 const parseGenreSource = (value: unknown): string[] => {
@@ -411,7 +397,6 @@ export const requestDiscogs = async (endpoint: string, params: Record<string, st
   throw new Error('Discogs request failed: exhausted retries')
 }
 
-const isFresh = (timestamp: number, ttl = RELEASE_CACHE_WINDOW) => Date.now() - timestamp < ttl
 const isNotExpired = (expiresAt: Date | null | undefined) => Boolean(expiresAt && expiresAt.getTime() > Date.now())
 export const isDiscogsCacheFresh = (refreshedAt: Date | null | undefined) =>
   Boolean(refreshedAt && Date.now() - refreshedAt.getTime() < DISCOGS_CACHE_MAX_AGE_MS)
@@ -1015,101 +1000,6 @@ const fetchAllSearchPages = async (
   return results
 }
 
-type FeaturedMode = 'featured' | 'recent-popular'
-
-const clampLimit = (value: number, fallback = 24) => {
-  const safe = Number.isFinite(value) ? value : fallback
-  return Math.min(Math.max(Math.round(safe), 1), FEATURED_REFRESH_SIZE)
-}
-
-const shouldRefreshSummaryPayload = (payload: ReleaseSummary[]) => {
-  if (!payload.length) return true
-  const sample = payload.slice(0, Math.min(payload.length, 24))
-  const containsTracksField = sample.some((release) => Array.isArray((release as { tracks?: unknown }).tracks))
-  if (containsTracksField) return true
-  const albumsWithCommunity = sample.filter(
-    (release) => Number(release.reviewCount ?? 0) > 0 && Number(release.communityRating ?? 0) > 0,
-  ).length
-  return albumsWithCommunity === 0
-}
-
-const getCachedFeatured = async (mode: FeaturedMode) => {
-  const rows = await db.select().from(featuredCacheTable).where(eq(featuredCacheTable.mode, mode)).limit(1)
-  return rows[0]
-}
-
-const upsertFeatured = async (mode: FeaturedMode, payload: ReleaseSummary[]) => {
-  const now = new Date()
-  const expiresAt = new Date(now.getTime() + FEATURED_DB_CACHE_WINDOW)
-
-  await db
-    .insert(featuredCacheTable)
-    .values({
-      mode,
-      payload,
-      expiresAt,
-      refreshedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: featuredCacheTable.mode,
-      set: {
-        payload,
-        expiresAt,
-        refreshedAt: now,
-        updatedAt: now,
-      },
-    })
-}
-
-export const fetchFeaturedSnapshotFromDiscogs = async (targetSize = FEATURED_REFRESH_SIZE) => {
-  const response = await requestDiscogs('/database/search', {
-    per_page: Math.max(targetSize * 2, 36),
-    type: 'release',
-    format: 'album',
-    sort: 'have',
-    sort_order: 'desc',
-  })
-
-  const normalized = mapDiscogsSearchResults(response.results ?? [])
-  const curated = dedupeReleasedAlbums(normalized)
-  const trimmed = curated.slice(0, targetSize)
-  return hydrateReleasesWithDetails(trimmed)
-}
-
-const fetchRecentPopularFromDiscogs = async (targetSize = FEATURED_REFRESH_SIZE) => {
-  const response = await requestDiscogs('/database/search', {
-    per_page: Math.max(targetSize * 4, 96),
-    type: 'release',
-    format: 'album',
-    sort: 'year',
-    sort_order: 'desc',
-  })
-
-  const normalized = mapDiscogsSearchResults(response.results ?? [])
-  const curated = dedupeReleasedAlbums(normalized)
-  const currentYear = new Date().getFullYear()
-  const recentStartYear = currentYear - 2
-
-  const recentFirst = curated
-    .filter((release) => Number(release.releaseYear ?? 0) >= recentStartYear)
-    .sort(
-      (a, b) =>
-        Number(b.releaseYear ?? 0) - Number(a.releaseYear ?? 0) || Number(b.popularity ?? 0) - Number(a.popularity ?? 0),
-    )
-
-  const olderFallback = curated
-    .filter((release) => Number(release.releaseYear ?? 0) < recentStartYear)
-    .sort(
-      (a, b) =>
-        Number(b.popularity ?? 0) - Number(a.popularity ?? 0) || Number(b.releaseYear ?? 0) - Number(a.releaseYear ?? 0),
-    )
-
-  const ranked = [...recentFirst, ...olderFallback]
-  return hydrateReleasesWithDetails(ranked.slice(0, targetSize))
-}
-
 const getIsoWeekNumber = (date: Date) => {
   const utcDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
   const dayNumber = utcDate.getUTCDay() || 7
@@ -1190,60 +1080,6 @@ export const fetchRecentReleaseCandidatesFromDiscogs = async (targetSize = FEATU
 
   return hydrateReleasesWithDetails(ranked.slice(0, Math.max(targetSize, FEATURED_REFRESH_SIZE)))
 }
-
-const refreshFeaturedMode = async (mode: FeaturedMode) => {
-  const existing = featuredRefreshInFlight.get(mode)
-  if (existing) return existing
-
-  const refreshPromise = (async () => {
-    const payload =
-      mode === 'recent-popular'
-        ? await fetchRecentPopularFromDiscogs(FEATURED_REFRESH_SIZE)
-        : await fetchFeaturedSnapshotFromDiscogs(FEATURED_REFRESH_SIZE)
-    await upsertFeatured(mode, payload)
-    return payload
-  })()
-
-  featuredRefreshInFlight.set(mode, refreshPromise)
-  return refreshPromise.finally(() => {
-    featuredRefreshInFlight.delete(mode)
-  })
-}
-
-const getFeaturedByMode = async (mode: FeaturedMode, limit = 24, forceRefresh = false) => {
-  const safeLimit = clampLimit(limit)
-  const cached = await getCachedFeatured(mode)
-  const cachedPayload = toReleaseSummaryArray(cached?.payload)
-  const refreshedAt = cached?.refreshedAt?.getTime?.() ?? 0
-  const recentRefresh = refreshedAt > 0 && Date.now() - refreshedAt < FEATURED_RETRY_COOLDOWN_MS
-
-  const cachedNeedsRefresh = shouldRefreshSummaryPayload(cachedPayload)
-  if (
-    !forceRefresh &&
-    cachedPayload.length &&
-    isNotExpired(cached?.expiresAt) &&
-    isDiscogsCacheFresh(cached?.refreshedAt) &&
-    (!cachedNeedsRefresh || recentRefresh)
-  ) {
-    return cachedPayload.slice(0, safeLimit)
-  }
-
-  try {
-    const refreshed = await refreshFeaturedMode(mode)
-    return refreshed.slice(0, safeLimit)
-  } catch {
-    if (cachedPayload.length && isDiscogsCacheFresh(cached?.refreshedAt)) {
-      return cachedPayload.slice(0, safeLimit)
-    }
-    throw new Error('Unable to refresh featured releases from Discogs.')
-  }
-}
-
-export const getFeaturedReleases = async (limit = 24, forceRefresh = false) =>
-  getFeaturedByMode('featured', limit, forceRefresh)
-
-export const getRecentPopularReleases = async (limit = 24, forceRefresh = false) =>
-  getFeaturedByMode('recent-popular', limit, forceRefresh)
 
 const getCachedSearch = async (queryHash: string, normalizedQuery: string) => {
   const rows = await db

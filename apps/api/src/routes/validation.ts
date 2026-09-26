@@ -24,11 +24,6 @@ export const readIdentifier = (value: unknown) => {
   return identifier || null
 }
 
-export const readOptionalText = (value: unknown, maxLength: number) => {
-  if (value === undefined) return undefined
-  return readBoundedText(value, maxLength)
-}
-
 export const readBoundedInteger = (value: unknown, { defaultValue, min, max }: IntegerBounds) => {
   if (value === undefined || value === null || value === '') return defaultValue
 
@@ -43,19 +38,6 @@ export const readBoundedInteger = (value: unknown, { defaultValue, min, max }: I
   return numeric
 }
 
-export const readTimestamp = (value: unknown) => {
-  if (value === undefined || value === null || value === '') return null
-  const numeric =
-    typeof value === 'number'
-      ? value
-      : typeof value === 'string' && /^\d+$/.test(value)
-        ? Number(value)
-        : Number.NaN
-
-  if (!Number.isSafeInteger(numeric) || numeric < 0 || !Number.isFinite(new Date(numeric).getTime())) return undefined
-  return numeric
-}
-
 export const readBoolean = (value: unknown) => (typeof value === 'boolean' ? value : null)
 
 export const readRating = (value: unknown) => {
@@ -66,23 +48,4 @@ export const readRating = (value: unknown) => {
         ? Number(value)
         : Number.NaN
   return Number.isFinite(numeric) ? numeric : null
-}
-
-export const readArtists = (value: unknown) => {
-  if (value === undefined) return undefined
-  if (!Array.isArray(value) || value.length > 10) return null
-
-  const artists: string[] = []
-  for (const artist of value) {
-    const normalized = readBoundedText(artist, 120)
-    if (normalized === null) return null
-    if (normalized) artists.push(normalized)
-  }
-  return artists.slice(0, 3)
-}
-
-export const readReleaseYear = (value: unknown) => {
-  if (value === undefined || value === null || value === '') return undefined
-  const numeric = readBoundedInteger(value, { defaultValue: 0, min: 1, max: 3000 })
-  return numeric === null ? null : numeric
 }

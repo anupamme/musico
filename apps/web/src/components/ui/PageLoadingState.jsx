@@ -52,49 +52,6 @@ export const UserListLoadingState = () => {
   )
 }
 
-export const HomePageSkeleton = () => {
-  return (
-    <section aria-busy="true" aria-label="Loading home" className="space-y-12">
-      <section className="overflow-hidden rounded-[2rem] border border-outline/50 bg-panel/50 px-6 py-10 tablet:px-10 tablet:py-14">
-        <div className="max-w-3xl space-y-5">
-          <div className="h-3 w-28 rounded-full bg-outline/70" />
-          <div className="h-14 w-full max-w-2xl rounded-[1.25rem] bg-gradient-to-r from-white/10 via-white/5 to-white/10 bg-[length:320px_100%] animate-shimmer tablet:h-20" />
-          <div className="h-4 w-full max-w-xl rounded-full bg-outline/60" />
-          <div className="flex gap-3 pt-2">
-            <div className="h-11 w-36 rounded-full bg-outline/65" />
-            <div className="h-11 w-28 rounded-full bg-outline/45" />
-          </div>
-        </div>
-      </section>
-
-      {['Weekly Chart Pulse', 'Weekly Fresh Pull'].map((label) => (
-        <section key={label} className="space-y-6">
-          <div className="flex flex-col gap-3 tablet:flex-row tablet:items-center tablet:justify-between">
-            <div className="space-y-3">
-              <div className="h-3 w-28 rounded-full bg-outline/70" />
-              <div className="h-10 w-72 rounded-full bg-gradient-to-r from-white/10 via-white/5 to-white/10 bg-[length:220px_100%] animate-shimmer" />
-            </div>
-            <div className="h-3 w-20 rounded-full bg-outline/50" />
-          </div>
-          <div className="grid gap-6 tablet:grid-cols-2 laptop:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <div key={index} className="space-y-4 rounded-3xl border border-outline/50 bg-panel/60 p-4">
-                <div className="aspect-square rounded-2xl bg-gradient-to-r from-black via-neutral-800 to-black bg-[length:400px_100%] animate-shimmer" />
-                <div className="h-6 w-3/4 rounded-full bg-outline" />
-                <div className="h-4 w-1/2 rounded-full bg-outline/80" />
-                <div className="flex gap-3">
-                  <div className="h-4 w-20 rounded-full bg-outline/70" />
-                  <div className="h-4 w-14 rounded-full bg-outline/60" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
-    </section>
-  )
-}
-
 export const DiscoverPageSkeleton = () => {
   return (
     <section aria-busy="true" aria-label="Loading discover" className="space-y-8">

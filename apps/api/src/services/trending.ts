@@ -7,7 +7,6 @@ import { db } from '../core/db'
 import {
   fetchRecentReleaseCandidatesFromDiscogs,
   getReleaseDetails,
-  getRecentPopularReleases,
   searchReleases,
 } from './discogs'
 import { env } from '../core/env'
@@ -409,6 +408,3 @@ export const refreshStoredHomeAlbums = async (params?: { happeningLimit?: number
     recentReleases,
   }
 }
-
-export const getFeaturedFallbackReleases = async (limit = 24) => getFeaturedReleases(limit)
-export const getRecentPopularFallbackReleases = async (limit = 24) => getRecentPopularReleases(limit)

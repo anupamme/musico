@@ -13,7 +13,6 @@ import { AlbumDetailsPageSkeleton } from '../components/ui/PageLoadingState.jsx'
 import { useAuth } from '../hooks/useAuth.js'
 import { useLists } from '../hooks/useLists.js'
 import { useRatings } from '../hooks/useRatings.js'
-import { trackOpenedAlbumGenres } from '../services/recommendationProfileService.js'
 import { getReleaseDetails } from '../services/discogsService.js'
 import { saveMyReview } from '../services/socialService.js'
 import {
@@ -50,7 +49,6 @@ const AlbumDetails = () => {
   const [busyListIds, setBusyListIds] = useState(() => new Set())
   const [reviewKey, setReviewKey] = useState(0) // increment to refresh reviews list
 
-  // Professional Data Fetching with TanStack Query
   const { 
     data: album, 
     isLoading: loading, 
@@ -92,16 +90,6 @@ const AlbumDetails = () => {
       return () => clearTimeout(timer)
     }
   }, [albumId])
-
-  useEffect(() => {
-    if (!album || !isSignedIn) return
-    if (location.state?.from !== '/search') return
-
-    trackOpenedAlbumGenres({
-      album,
-      scope: user.id,
-    })
-  }, [album, isSignedIn, location.state, user?.id])
 
   const handleCreateList = async (event) => {
     event.preventDefault()

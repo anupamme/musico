@@ -1,4 +1,4 @@
-import { desc, eq, gte, sql } from 'drizzle-orm'
+import { desc, gte, sql } from 'drizzle-orm'
 
 import { db } from '../core/db'
 import { userSearchTrend } from '../core/schema'
@@ -55,14 +55,4 @@ export const getTopSearchQueries = async (limit = MAX_TOP_SEARCH_QUERIES) => {
     .limit(Math.max(1, limit))
 
   return rows
-}
-
-export const getSearchQueryCount = async (normalizedQuery: string) => {
-  const rows = await db
-    .select({ searchCount: userSearchTrend.searchCount })
-    .from(userSearchTrend)
-    .where(eq(userSearchTrend.normalizedQuery, normalizedQuery))
-    .limit(1)
-
-  return rows[0]?.searchCount ?? 0
 }

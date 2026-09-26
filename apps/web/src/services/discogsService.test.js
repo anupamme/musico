@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import api from './apiClient.js'
-import { getHomeSections } from './discogsService.js'
+import { getHomeSections, updateAlbumCommunityStatsInCache } from './discogsService.js'
 
 const album = {
   id: 'm:1',
@@ -39,6 +39,12 @@ test('re-fetches home sections after a partial failure', async () => {
     const result = await getHomeSections()
     assert.equal(calls, 2)
     assert.deepEqual(result.mostHappening.data, [album])
+
+    updateAlbumCommunityStatsInCache({ albumId: album.id, communityRating: 4.5, reviewCount: 2 })
+    const cached = await getHomeSections()
+    assert.equal(calls, 2)
+    assert.equal(cached.mostHappening.data[0].communityRating, 4.5)
+    assert.equal(cached.recentReleases.data[0].reviewCount, 2)
   } finally {
     api.defaults.adapter = originalAdapter
   }
