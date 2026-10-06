@@ -171,8 +171,19 @@ export const matchBillboardAlbums = async (
 }
 
 const getMostHappeningAlbums = async (limit = 12) => {
-  const chartAlbums = await fetchBillboard200Albums(Math.min(Math.max(limit * 2, limit), 50))
-  return matchBillboardAlbums(chartAlbums, searchReleases, limit)
+  try {
+    const chartAlbums = await fetchBillboard200Albums(Math.min(Math.max(limit * 2, limit), 50))
+    const matches = await matchBillboardAlbums(chartAlbums, searchReleases, limit)
+    if (matches.length) return matches
+    throw new Error('Billboard chart has no matching Discogs albums.')
+  } catch (error) {
+    console.warn('[homepage] Billboard unavailable; using Discogs', error instanceof Error ? error.message : String(error))
+  }
+
+  const candidates = await fetchRecentReleaseCandidatesFromDiscogs(Math.max(limit * 2, 48))
+  return candidates
+    .sort((a, b) => Number(b.popularity ?? 0) - Number(a.popularity ?? 0))
+    .slice(0, limit)
 }
 
 const getStoredAlbumIds = async (mode: StoredMode) => {
@@ -255,8 +266,7 @@ const upsertStoredSnapshot = async (mode: StoredMode, snapshot: ReleaseSummary[]
   const refreshedAt = new Date()
 
   if (!snapshot.length) {
-    await db.delete(storedTrendingAlbum).where(eq(storedTrendingAlbum.mode, mode))
-    return { refreshedAt, insertedOrUpdated: 0, data: [] as ReleaseSummary[] }
+    throw new Error(`Homepage refresh returned no albums for ${mode}; preserving the stored snapshot.`)
   }
 
   await db
@@ -400,11 +410,27 @@ export const refreshStoredHomeAlbums = async (params?: { happeningLimit?: number
   const happeningLimit = clampLimit(params?.happeningLimit ?? defaultLimit, defaultLimit)
   const recentLimit = clampLimit(params?.recentLimit ?? defaultLimit, defaultLimit)
 
+  // Attempt both sections, even when one provider or database operation fails.
   const mostHappening = await refreshStoredTrendingAlbums('featured', happeningLimit)
+    .then((value) => ({ value, error: null }))
+    .catch((error: unknown) => ({ value: null, error }))
   const recentReleases = await refreshStoredTrendingAlbums('recent-popular', recentLimit)
+    .then((value) => ({ value, error: null }))
+    .catch((error: unknown) => ({ value: null, error }))
+
+  if (!mostHappening.value || !recentReleases.value) {
+    const failures = [
+      !mostHappening.value ? { mode: 'featured', error: mostHappening.error } : null,
+      !recentReleases.value ? { mode: 'recent-popular', error: recentReleases.error } : null,
+    ].filter((failure) => failure !== null)
+    throw new AggregateError(
+      failures.map(({ error }) => error),
+      failures.map(({ mode, error }) => `${mode}: ${error instanceof Error ? error.message : String(error)}`).join('; '),
+    )
+  }
 
   return {
-    mostHappening,
-    recentReleases,
+    mostHappening: mostHappening.value,
+    recentReleases: recentReleases.value,
   }
 }
