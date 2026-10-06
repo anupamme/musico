@@ -118,7 +118,12 @@ const SearchBar = ({
   const showDropdown = isFocused && (showSuggestions || showRecentSearches)
 
   return (
-    <div className="relative z-50">
+    <div
+      className="relative z-50"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setIsFocused(false)
+      }}
+    >
       <div 
         className={`relative flex items-center gap-3 rounded-2xl border transition-all duration-300 ${
           isFocused 
@@ -140,7 +145,6 @@ const SearchBar = ({
             setIsFocused(true)
             setRecentSearches(enableHistory ? getSearchHistory(historyScope) : [])
           }}
-          onBlur={() => setTimeout(() => setIsFocused(false), 200)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder ?? 'Search music, artists, vibes...'}
           aria-label="Search music"

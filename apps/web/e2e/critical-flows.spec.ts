@@ -245,6 +245,9 @@ test.describe('Critical user flows', () => {
     await search.fill('')
     const recentSearch = page.getByRole('button', { name: 'Search U2' })
     await recentSearch.focus()
+    // Keyboard users can pause after moving focus into the history dropdown.
+    await page.waitForTimeout(350)
+    await expect(recentSearch).toBeFocused()
     await page.keyboard.press('Enter')
     await expect(page).toHaveURL('/search?q=U2')
   })

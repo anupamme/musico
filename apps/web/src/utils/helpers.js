@@ -28,7 +28,7 @@ export const generateStreamingLinks = (album) => {
   const albumName = encodeURIComponent(album.name ?? '')
 
   return {
-    spotify: album.external_urls?.spotify,
+    spotify: album.external_urls?.spotify || `https://open.spotify.com/search/${encodeURIComponent(`${album.artists?.[0] ?? ''} ${album.name ?? ''}`.trim())}`,
     appleMusic: `https://music.apple.com/search?term=${artistName}+${albumName}`,
     youtubeMusic: `https://music.youtube.com/search?q=${artistName}+${albumName}`,
     amazonMusic: `https://music.amazon.com/search/${artistName}+${albumName}`,
