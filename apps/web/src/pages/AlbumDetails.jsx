@@ -429,7 +429,7 @@ const AlbumDetails = () => {
                     className="grid grid-cols-[minmax(0,1fr)_4.5rem] items-center gap-3 border-b border-outline/80 px-2 py-3 text-sm last:border-b-0"
                   >
                     <div className="flex min-w-0 items-center gap-4">
-                      <span className="w-4 text-xs tabular-nums text-muted">{track.track_number ?? index + 1}</span>
+                      <span data-testid="track-number" className="w-4 text-xs tabular-nums text-muted">{index + 1}</span>
                       <span className="truncate text-white">{track.name}</span>
                     </div>
                     <span data-testid="track-duration" className="grid grid-cols-[1rem_1fr] items-center gap-2 text-xs tabular-nums text-muted">

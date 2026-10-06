@@ -22,55 +22,29 @@ const decodeHtmlEntities = (value: string) =>
 
 const normalizeWhitespace = (value = '') => value.replace(/\s+/g, ' ').trim()
 
-const isNumericLine = (value: string) => /^\d+$/.test(value)
+const sanitizeChartLine = (value: string) =>
+  normalizeWhitespace(decodeHtmlEntities(value.replace(/<[^>]+>/g, ' ')))
 
-const isChartMetaLine = (value: string) => {
-  const normalized = value.toLowerCase()
-  return (
-    !normalized ||
-    normalized === 'new' ||
-    normalized === '-' ||
-    normalized === 'awards' ||
-    normalized === 'this' ||
-    normalized === 'week' ||
-    normalized === 'last' ||
-    normalized === 'peak' ||
-    normalized === 'pos.' ||
-    normalized === 'pos' ||
-    normalized === 'wks on' ||
-    normalized === 'chart' ||
-    normalized === 'see full chart here' ||
-    normalized === 'advertisement' ||
-    isNumericLine(value)
-  )
-}
+export const parseBillboard200Albums = (html: string, limit = 12): ChartAlbum[] => {
+  // Scope fields to a chart row: historical positions and weeks are also numbers.
+  const rows = html.split(/<div\b[^>]*class=["']chart-item["'][^>]*>/i).slice(1)
+  const entries: ChartAlbum[] = []
+  const seenRanks = new Set<number>()
 
-const sanitizeChartLine = (value: string) => normalizeWhitespace(decodeHtmlEntities(value))
-
-const extractTextLines = (html: string) =>
-  decodeHtmlEntities(
-    html
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<\/(p|div|section|article|li|tr|td|h1|h2|h3|h4|h5|h6)>/gi, '\n')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<[^>]+>/g, ' '),
-  )
-    .split('\n')
-    .map(sanitizeChartLine)
-    .filter(Boolean)
-
-const findChartStartIndex = (lines: string[]) => {
-  const wksOnChartIndex = lines.findIndex((line, index) => line === 'WKS ON' && lines[index + 1] === 'CHART')
-  if (wksOnChartIndex >= 0) return wksOnChartIndex + 2
-
-  const billboardIndex = lines.findIndex((line) => line === 'Billboard 200')
-  if (billboardIndex >= 0) {
-    const firstRankIndex = lines.findIndex((line, index) => index > billboardIndex && line === '1')
-    if (firstRankIndex >= 0) return firstRankIndex
+  for (const row of rows) {
+    const position = row.match(/<div\b[^>]*class=["']chart-item-position["'][^>]*>([\s\S]*?)<\/div>/i)?.[1]
+    const headline = row.match(/<h2\b[^>]*class=["']chart-item-headline["'][^>]*>([\s\S]*?)<\/h2>/i)?.[1]
+    const subheadline = row.match(/<h3\b[^>]*class=["']chart-item-subheadline["'][^>]*>([\s\S]*?)<\/h3>/i)?.[1]
+    const rank = Number(position?.trim())
+    const name = sanitizeChartLine(headline ?? '')
+    const artist = sanitizeChartLine(subheadline ?? '')
+    if (!Number.isInteger(rank) || rank < 1 || rank > 200 || seenRanks.has(rank) || !name || !artist) continue
+    entries.push({ rank, name, artist })
+    seenRanks.add(rank)
   }
 
-  return lines.findIndex((line) => line === '1')
+  if (!entries.length) throw new Error('Billboard 200 chart returned no parsable albums.')
+  return entries.sort((a, b) => a.rank - b.rank).slice(0, limit)
 }
 
 export const fetchBillboard200Albums = async (limit = 12) => {
@@ -86,47 +60,5 @@ export const fetchBillboard200Albums = async (limit = 12) => {
   }
 
   const html = await response.text()
-  const lines = extractTextLines(html)
-  const startIndex = findChartStartIndex(lines)
-
-  if (startIndex < 0) {
-    throw new Error('Unable to parse Billboard 200 chart entries.')
-  }
-
-  const entries: ChartAlbum[] = []
-  const seenRanks = new Set<number>()
-
-  for (let index = startIndex; index < lines.length && entries.length < limit; index += 1) {
-    const line = lines[index]
-    if (!isNumericLine(line)) continue
-
-    const rank = Number.parseInt(line, 10)
-    if (!Number.isFinite(rank) || rank < 1 || rank > 200 || seenRanks.has(rank)) continue
-
-    let cursor = index + 1
-    while (cursor < lines.length && isChartMetaLine(lines[cursor])) cursor += 1
-
-    const name = lines[cursor]
-    if (!name || isChartMetaLine(name)) continue
-
-    cursor += 1
-    while (cursor < lines.length && isChartMetaLine(lines[cursor])) cursor += 1
-
-    const artist = lines[cursor]
-    if (!artist || isChartMetaLine(artist)) continue
-
-    entries.push({
-      rank,
-      name,
-      artist,
-    })
-    seenRanks.add(rank)
-    index = cursor
-  }
-
-  if (!entries.length) {
-    throw new Error('Billboard 200 chart returned no parsable albums.')
-  }
-
-  return entries
+  return parseBillboard200Albums(html, limit)
 }
