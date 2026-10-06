@@ -333,6 +333,22 @@ test.describe('Critical user flows', () => {
     expect(Math.max(...positions) - Math.min(...positions)).toBeLessThan(2)
   })
 
+  test('vinyl side numbers do not restart the displayed track sequence', async ({ page }) => {
+    await page.route('**/api/releases/m:1001', async (route) => {
+      await route.fulfill({ json: {
+        id: 'm:1001', name: 'Discovery', artists: ['Daft Punk'],
+        tracks: [
+          { id: 'a1', name: 'One More Time', track_number: 1 },
+          { id: 'a2', name: 'Aerodynamic', track_number: 2 },
+          { id: 'b1', name: 'Digital Love', track_number: 1 },
+        ],
+      } })
+    })
+    await page.goto('/album/m:1001')
+    await expect(page.getByTestId('track-number')).toHaveText(['1', '2', '3'])
+    await expect(page.getByRole('link', { name: 'Spotify', exact: true }).first()).toHaveAttribute('href', 'https://open.spotify.com/search/Daft%20Punk%20Discovery')
+  })
+
   test('lists show their loading state until the account lists arrive', async ({ page }) => {
     let releaseLists: (() => void) | undefined
     await page.route('**/api/me/lists', async (route) => {
