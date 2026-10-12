@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import { desc, eq, or } from 'drizzle-orm'
+import { desc, eq, inArray, or } from 'drizzle-orm'
 import { LRUCache } from 'lru-cache'
 
 import type { ReleaseDetails, ReleaseSummary } from '../core/types'
@@ -340,6 +340,22 @@ export const requestDiscogs = async (endpoint: string, params: Record<string, st
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), DISCOGS_REQUEST_TIMEOUT_MS)
       try {
+        const relayUrl = env.DISCOGS_RELAY_URL
+        if (relayUrl) {
+          if (!env.DISCOGS_RELAY_SECRET) throw new Error('Discogs relay secret missing')
+          const relay = new URL(relayUrl)
+          if (relay.protocol !== 'https:') throw new Error('Discogs relay requires HTTPS')
+          relay.searchParams.set('path', url.pathname)
+          const relayHeaders: Record<string, string> = {
+            Accept: 'application/json', Authorization: `Bearer ${env.DISCOGS_RELAY_SECRET}`,
+          }
+          if (headers.Authorization) relayHeaders['x-discogs-authorization'] = headers.Authorization
+          url.searchParams.forEach((value, key) => {
+            if (['token', 'key', 'secret'].includes(key)) relayHeaders[`x-discogs-${key}`] = value
+            else relay.searchParams.append(key, value)
+          })
+          return await fetch(relay, { headers: relayHeaders, signal: controller.signal, redirect: 'manual' })
+        }
         return await fetch(url, { headers, signal: controller.signal })
       } finally {
         clearTimeout(timeout)
@@ -1033,7 +1049,7 @@ const parseReleaseDateValue = (release: ReleaseSummary) => {
   return 0
 }
 
-export const fetchRecentReleaseCandidatesFromDiscogs = async (targetSize = FEATURED_REFRESH_SIZE * 3) => {
+export const fetchRecentReleaseCandidatesFromDiscogs = async (targetSize = FEATURED_REFRESH_SIZE * 3, options: { hydrate?: boolean } = {}) => {
   const currentDate = new Date()
   const currentYear = currentDate.getFullYear()
   const isoWeek = getIsoWeekNumber(currentDate)
@@ -1044,21 +1060,16 @@ export const fetchRecentReleaseCandidatesFromDiscogs = async (targetSize = FEATU
     { year: currentYear - 1, pages: [1, rotatingPage] },
   ]
 
-  const responses = await Promise.all(
-    requestPlan.flatMap(({ year, pages }) =>
-      Array.from(new Set(pages)).map((page) =>
-        requestDiscogs('/database/search', {
-          per_page: perPage,
-          page,
-          type: 'release',
-          format: 'album',
-          year,
-          sort: 'year',
-          sort_order: 'desc',
-        }),
-      ),
-    ),
-  )
+  // Keep retries serialized; parallel request reservations can overlap after rate-limit backoff.
+  const responses = []
+  for (const { year, pages } of requestPlan) {
+    for (const page of new Set(pages)) {
+      responses.push(await requestDiscogs('/database/search', {
+        per_page: perPage, page, type: 'release', format: 'album', year,
+        sort: 'year', sort_order: 'desc',
+      }))
+    }
+  }
 
   const normalized = responses.flatMap((response) => mapDiscogsSearchResults(response?.results ?? []))
   const curated = dedupeReleasedAlbums(normalized)
@@ -1078,7 +1089,8 @@ export const fetchRecentReleaseCandidatesFromDiscogs = async (targetSize = FEATU
       return Number(b.popularity ?? 0) - Number(a.popularity ?? 0)
     })
 
-  return hydrateReleasesWithDetails(ranked.slice(0, Math.max(targetSize, FEATURED_REFRESH_SIZE)))
+  const candidates = ranked.slice(0, Math.max(targetSize, FEATURED_REFRESH_SIZE))
+  return options.hydrate === false ? candidates : hydrateReleasesWithDetails(candidates)
 }
 
 const getCachedSearch = async (queryHash: string, normalizedQuery: string) => {
@@ -1091,6 +1103,22 @@ const getCachedSearch = async (queryHash: string, normalizedQuery: string) => {
     ))
     .orderBy(desc(searchCacheTable.refreshedAt))
   return selectStoredSearchCache(rows, queryHash, normalizedQuery)
+}
+
+// Homepage jobs use stored searches in one database round trip rather than fan out
+// into the interactive search pipeline (paging, fuzzy matching and detail hydration).
+export const getStoredSearchResults = async (queries: string[]): Promise<Map<string, ReleaseSummary[]>> => {
+  const normalized = Array.from(new Set(queries.map(normalizeCacheQuery).filter(Boolean)))
+  if (!normalized.length) return new Map()
+  const hashes = normalized.map(createQueryHash)
+  const rows = await db.select().from(searchCacheTable)
+    .where(or(inArray(searchCacheTable.queryHash, hashes), inArray(searchCacheTable.normalizedQuery, normalized)))
+    .orderBy(desc(searchCacheTable.refreshedAt))
+  return new Map(queries.map((query) => {
+    const key = normalizeCacheQuery(query)
+    const cached = selectStoredSearchCache(rows, createQueryHash(key), key)
+    return [query, toReleaseSummaryArray(cached?.payload)]
+  }))
 }
 
 const upsertSearchCache = async (queryHash: string, normalizedQuery: string, payload: ReleaseSummary[]) => {
@@ -1259,7 +1287,8 @@ export const searchReleases = async (query: string, options: SearchOptions = {})
     }
 
     return pageSearchBatch(results, limit, offset)
-  } catch {
+  } catch (error) {
+    console.error('[search] refresh failed', error instanceof Error ? error.message : String(error))
     if (shouldServeStoredSearchCache(cached)) {
       const cachedSmart = buildSmartSearchResults(cachedPayload, trimmed, EXPANDED_SEARCH_RESULT_LIMIT)
       return pageSearchBatch(cachedSmart, limit, offset)

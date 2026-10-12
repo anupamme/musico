@@ -6,6 +6,7 @@ Bun.env.DISCOGS_REQUEST_TIMEOUT_MS = '10'
 
 const {
   buildSmartSearchResults,
+  fetchRecentReleaseCandidatesFromDiscogs,
   isDiscogsCacheFresh,
   matchesSearchCacheQuery,
   normalizeSearchValue,
@@ -118,4 +119,90 @@ test('ranks an exact artist and album match above a more popular partial result'
   )
 
   expect(result.data[0]?.id).toBe('m:exact')
+})
+
+
+test('homepage candidate scan uses at most five search requests without fetching album details', async () => {
+  const originalFetch = globalThis.fetch
+  const paths: string[] = []
+  let active = 0
+  let maxActive = 0
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input))
+    paths.push(url.pathname)
+    active++
+    maxActive = Math.max(maxActive, active)
+    await new Promise((resolve) => setTimeout(resolve, 1))
+    active--
+    return Response.json({ results: [{
+      id: paths.length, title: `Artist - Album ${paths.length}`, year: Number(url.searchParams.get('year')),
+      format: ['Album'], cover_image: 'https://example.com/cover.jpg', community: { have: 100, want: 20 },
+    }] })
+  }
+  try {
+    const results = await fetchRecentReleaseCandidatesFromDiscogs(96, { hydrate: false })
+    expect(results.length).toBeGreaterThan(0)
+    expect(paths.length).toBeLessThanOrEqual(5)
+    expect(paths.every((path) => path === '/database/search')).toBe(true)
+    expect(maxActive).toBe(1)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('configured relay keeps credentials out of its URL and bypasses Workers egress', async () => {
+  const script = `
+    process.env.DISCOGS_RELAY_URL = 'https://musico-web.vercel.app/api/discogs'
+    process.env.DISCOGS_RELAY_SECRET = 'internal-secret'
+    process.env.DISCOGS_TOKEN = 'provider-token'
+    process.env.DISCOGS_MIN_REQUEST_INTERVAL_MS = '1'
+    let received
+    globalThis.fetch = async (url, options) => {
+      if (!['follow', 'manual'].includes(options.redirect)) throw new Error('Unsupported Workers redirect mode')
+      received = { url: String(url), headers: options.headers, redirect: options.redirect }
+      return Response.json({ id: 1706292 })
+    }
+    const { requestDiscogs } = await import('./src/services/discogs.ts')
+    const result = await requestDiscogs('/masters/1706292')
+    console.log(JSON.stringify({ received, result }))
+  `
+  const child = Bun.spawn([process.execPath, '--eval', script], {
+    cwd: new URL('../..', import.meta.url).pathname, stdout: 'pipe', stderr: 'pipe',
+  })
+  const [exitCode, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
+  expect(stderr).toBe('')
+  expect(exitCode).toBe(0)
+  const { received, result } = JSON.parse(stdout)
+  expect(received.url).toBe('https://musico-web.vercel.app/api/discogs?path=%2Fmasters%2F1706292')
+  expect(received.headers.Authorization).toBe('Bearer internal-secret')
+  expect(received.headers['x-discogs-authorization']).toBe('Discogs token=provider-token')
+  expect(received.redirect).toBe('manual')
+  expect(result.id).toBe(1706292)
+})
+
+
+test('configured relay refuses redirects without forwarding credentials to another origin', async () => {
+  const script = `
+    process.env.DISCOGS_RELAY_URL = 'https://musico-web.vercel.app/api/discogs'
+    process.env.DISCOGS_RELAY_SECRET = 'internal-secret'
+    process.env.DISCOGS_MIN_REQUEST_INTERVAL_MS = '1'
+    let calls = 0
+    globalThis.fetch = async (url, options) => {
+      calls++
+      if (options.redirect !== 'manual') throw new Error('Redirect could expose credentials')
+      return new Response('', { status: 302, headers: { Location: 'https://other.example' } })
+    }
+    const { requestDiscogs } = await import('./src/services/discogs.ts')
+    try { await requestDiscogs('/masters/1706292') }
+    catch (error) { console.log(JSON.stringify({ calls, message: error.message })) }
+  `
+  const child = Bun.spawn([process.execPath, '--eval', script], {
+    cwd: new URL('../..', import.meta.url).pathname, stdout: 'pipe', stderr: 'pipe',
+  })
+  const [exitCode, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
+  expect(stderr).toBe('')
+  expect(exitCode).toBe(0)
+  const result = JSON.parse(stdout)
+  expect(result.calls).toBe(1)
+  expect(result.message).toContain('Discogs request failed: 302')
 })
